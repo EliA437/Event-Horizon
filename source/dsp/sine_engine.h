@@ -5,9 +5,6 @@
 
 namespace EventHorizon {
 
-//------------------------------------------------------------------------
-// Equal-temperament sine voices (A4 = 440 Hz, MIDI note 69), matching Serum / VST MIDI.
-//------------------------------------------------------------------------
 class SineEngine
 {
 public:
@@ -25,15 +22,21 @@ private:
 	struct Voice
 	{
 		bool active {false};
+		bool releasing {false};
 		int32_t noteId {-1};
 		int16_t pitch {0};
 		double phase {0.0};
 		double phaseIncrement {0.0};
 		float gain {0.f};
+		float envelope {0.f};
+		float releaseStep {0.f};
 	};
+
+	static constexpr double kReleaseTimeSec = 0.035;
 
 	static double midiNoteToHz (int16_t midiNote, float tuningCents);
 	Voice* allocateVoice ();
+	void beginRelease (Voice& voice);
 
 	Voice voices[kMaxVoices] {};
 	double sampleRate {44100.0};
@@ -71,6 +74,13 @@ inline SineEngine::Voice* SineEngine::allocateVoice ()
 }
 
 //------------------------------------------------------------------------
+inline void SineEngine::beginRelease (Voice& voice)
+{
+	voice.releasing = true;
+	voice.releaseStep = static_cast<float> (1.0 / (sampleRate * kReleaseTimeSec));
+}
+
+//------------------------------------------------------------------------
 inline void SineEngine::noteOn (int16_t pitch, int32_t noteId, float velocity, float tuningCents)
 {
 	if (pitch < 0 || pitch > 127)
@@ -86,6 +96,8 @@ inline void SineEngine::noteOn (int16_t pitch, int32_t noteId, float velocity, f
 				const double hz = midiNoteToHz (pitch, tuningCents);
 				voice.phaseIncrement = hz / sampleRate;
 				voice.gain = velocity;
+				voice.releasing = false;
+				voice.envelope = 1.f;
 				return;
 			}
 		}
@@ -93,12 +105,14 @@ inline void SineEngine::noteOn (int16_t pitch, int32_t noteId, float velocity, f
 
 	Voice* voice = allocateVoice ();
 	voice->active = true;
+	voice->releasing = false;
 	voice->noteId = noteId;
 	voice->pitch = pitch;
 	voice->phase = 0.0;
 	const double hz = midiNoteToHz (pitch, tuningCents);
 	voice->phaseIncrement = hz / sampleRate;
 	voice->gain = velocity;
+	voice->envelope = 1.f;
 }
 
 //------------------------------------------------------------------------
@@ -110,7 +124,8 @@ inline void SineEngine::noteOff (int16_t pitch, int32_t noteId)
 		{
 			if (voice.active && voice.noteId == noteId)
 			{
-				voice.active = false;
+				if (!voice.releasing)
+					beginRelease (voice);
 				return;
 			}
 		}
@@ -120,7 +135,8 @@ inline void SineEngine::noteOff (int16_t pitch, int32_t noteId)
 	{
 		if (voice.active && voice.pitch == pitch)
 		{
-			voice.active = false;
+			if (!voice.releasing)
+				beginRelease (voice);
 			return;
 		}
 	}
@@ -135,15 +151,29 @@ inline void SineEngine::process (float* outL, float* outR, int32_t numSamples)
 	for (int32_t i = 0; i < numSamples; ++i)
 	{
 		float sample = 0.f;
-		for (const auto& voice : voices)
+		for (auto& voice : voices)
 		{
 			if (!voice.active)
 				continue;
-			sample += static_cast<float> (std::sin (kTwoPi * voice.phase)) * voice.gain;
+
+			sample += static_cast<float> (std::sin (kTwoPi * voice.phase)) * voice.gain *
+			          voice.envelope;
+
 			double phase = voice.phase + voice.phaseIncrement;
 			if (phase >= 1.0)
 				phase -= 1.0;
-			const_cast<Voice&> (voice).phase = phase;
+			voice.phase = phase;
+
+			if (voice.releasing)
+			{
+				voice.envelope -= voice.releaseStep;
+				if (voice.envelope <= 0.f)
+				{
+					voice.active = false;
+					voice.releasing = false;
+					voice.envelope = 0.f;
+				}
+			}
 		}
 		sample *= kMasterGain;
 		outL[i] = sample;

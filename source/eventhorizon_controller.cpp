@@ -61,9 +61,7 @@ VSTGUI::IController* EventHorizonController::createSubController (VSTGUI::UTF8St
 			playerDelegate = createKeyboardPlayerDelegate (
 			    getPeer (), [this] () { return allocateMessage (); });
 		}
-		if (keyboardRange.length == 0)
-			keyboardRange.length = 24;
-		return createKeyboardController (editor, playerDelegate, keyboardRange);
+		return createKeyboardController (editor, playerDelegate, keyboardStartNote);
 	}
 	return nullptr;
 }

@@ -34,7 +34,7 @@ public:
 
 private:
 	VSTGUI::IKeyboardViewPlayerDelegate* playerDelegate {nullptr};
-	VSTGUI::KeyboardViewRangeSelector::Range keyboardRange {};
+	int16_t keyboardStartNote {kKeyboardDefaultStartNote};
 };
 
 //------------------------------------------------------------------------

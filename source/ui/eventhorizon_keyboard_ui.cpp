@@ -6,11 +6,17 @@
 #include "pluginterfaces/base/smartpointer.h"
 #include "pluginterfaces/vst/ivstevents.h"
 #include "pluginterfaces/vst/ivstmessage.h"
+#include "vstgui/contrib/keyboardview.h"
+#include "vstgui/lib/ccolor.h"
+#include "vstgui/lib/controls/cbuttons.h"
+#include "vstgui/lib/controls/ccontrol.h"
 #include "vstgui/lib/iviewlistener.h"
 #include "vstgui/uidescription/delegationcontroller.h"
 
+#include <algorithm>
 #include <cassert>
 #include <cmath>
+#include <cstring>
 #include <map>
 
 using namespace Steinberg;
@@ -82,30 +88,30 @@ private:
 //------------------------------------------------------------------------
 class KeyboardController : public DelegationController,
                            public ViewListenerAdapter,
-                           public IKeyboardViewKeyRangeChangedListener,
                            public KeyboardViewPlayerDelegate
 {
 public:
-	KeyboardController (IController* parent, IKeyboardViewPlayerDelegate* inPlayer,
-	                    KeyboardViewRangeSelector::Range& range)
-	: DelegationController (parent), player (inPlayer), selectedRange (range)
+	KeyboardController (IController* parent, IKeyboardViewPlayerDelegate* inPlayer, int16_t& inStartNote)
+	: DelegationController (parent), player (inPlayer), startNote (inStartNote)
 	{
 	}
 
 	~KeyboardController () noexcept override
 	{
-		if (player)
-		{
-			for (auto& e : noteOnIds)
-				player->onNoteOff (e.second, e.first);
-		}
+		releaseAllNotes ();
 		if (keyboard)
 			keyboard->unregisterViewListener (this);
-		if (rangeSelector)
+	}
+
+	IControlListener* getControlListener (UTF8StringPtr controlTagName) override
+	{
+		if (controlTagName)
 		{
-			rangeSelector->unregisterViewListener (this);
-			rangeSelector->unregisterKeyRangeChangedListener (this);
+			if (strcmp (controlTagName, "OctaveUp") == 0 ||
+			    strcmp (controlTagName, "OctaveDown") == 0)
+				return this;
 		}
+		return controller->getControlListener (controlTagName);
 	}
 
 	CView* verifyView (CView* view, const UIAttributes& attributes,
@@ -118,34 +124,84 @@ public:
 			keyboard->registerViewListener (this);
 			keyboard->setDelegate (this);
 		}
-		else if (auto kbsv = dynamic_cast<KeyboardViewRangeSelector*> (view))
+		else if (auto* button = dynamic_cast<CTextButton*> (view))
 		{
-			assert (rangeSelector == nullptr);
-			rangeSelector = kbsv;
-			rangeSelector->registerViewListener (this);
-			rangeSelector->registerKeyRangeChangedListener (this);
-			if (selectedRange.length > 0)
-				rangeSelector->setSelectionRange (selectedRange);
+			const auto tag = button->getTag ();
+			if (tag == kOctaveUpTag || tag == kOctaveDownTag)
+			{
+				button->setListener (this);
+				button->setTextColor (CColor (210, 210, 215));
+				button->setTextColorHighlighted (CColor (255, 255, 255));
+				button->setFrameColor (CColor (90, 90, 100));
+				button->setFrameColorHighlighted (CColor (120, 120, 135));
+				button->setTextAlignment (kCenterText);
+			}
 		}
 		return controller->verifyView (view, attributes, description);
 	}
 
 	void viewAttached (CView* view) override
 	{
-		if (view == rangeSelector)
+		if (view == keyboard)
 			updateKeyboard ();
 	}
 
 	void viewWillDelete (CView* view) override
 	{
-		if (view == rangeSelector)
-			rangeSelector = nullptr;
-		else if (view == keyboard)
+		if (view == keyboard)
+		{
+			keyboard->unregisterViewListener (this);
 			keyboard = nullptr;
-		view->unregisterViewListener (this);
+		}
+	}
+
+	void valueChanged (CControl* control) override
+	{
+		if (!control)
+			return;
+
+		switch (control->getTag ())
+		{
+			case kOctaveUpTag:
+				if (control->getValue () >= 0.5f)
+					changeOctave (12);
+				return;
+			case kOctaveDownTag:
+				if (control->getValue () >= 0.5f)
+					changeOctave (-12);
+				return;
+			default:
+				if (controller)
+					controller->valueChanged (control);
+				break;
+		}
+	}
+
+	void controlBeginEdit (CControl* control) override
+	{
+		if (isOctaveControl (control))
+			return;
+		if (controller)
+			controller->controlBeginEdit (control);
+	}
+
+	void controlEndEdit (CControl* control) override
+	{
+		if (isOctaveControl (control))
+			return;
+		if (controller)
+			controller->controlEndEdit (control);
 	}
 
 private:
+	static bool isOctaveControl (const CControl* control)
+	{
+		if (!control)
+			return false;
+		const auto tag = control->getTag ();
+		return tag == kOctaveUpTag || tag == kOctaveDownTag;
+	}
+
 	int32_t onNoteOn (NoteIndex note, double xPos, double yPos) override
 	{
 		int32_t noteID = note;
@@ -156,8 +212,6 @@ private:
 		}
 		if (keyboard)
 			keyboard->setKeyPressed (note, true);
-		if (rangeSelector)
-			rangeSelector->setKeyPressed (note, true);
 		return noteID;
 	}
 
@@ -168,8 +222,6 @@ private:
 			player->onNoteOff (note, noteID);
 			noteOnIds.erase (noteID);
 		}
-		if (rangeSelector)
-			rangeSelector->setKeyPressed (note, false);
 		if (keyboard)
 			keyboard->setKeyPressed (note, false);
 	}
@@ -180,41 +232,54 @@ private:
 			player->onNoteModulation (noteID, xPos, yPos);
 	}
 
-	void onKeyRangeChanged (KeyboardViewRangeSelector*) override
+	void releaseAllNotes ()
 	{
-		if (!keyboard || !rangeSelector)
+		const auto activeNotes = noteOnIds;
+		for (const auto& e : activeNotes)
+		{
+			if (keyboard)
+				keyboard->setKeyPressed (e.second, false);
+			if (player)
+				player->onNoteOff (e.second, e.first);
+		}
+		noteOnIds.clear ();
+	}
+
+	void changeOctave (int16_t semitones)
+	{
+		const int16_t nextStart =
+		    static_cast<int16_t> (std::clamp (static_cast<int> (startNote) + semitones,
+		                                      static_cast<int> (kKeyboardMinStartNote),
+		                                      static_cast<int> (kKeyboardMaxStartNote)));
+		if (nextStart == startNote)
 			return;
-		auto range = rangeSelector->getSelectionRange ();
-		while (!keyboard->isWhiteKey (range.position))
-			range.position--;
-		rangeSelector->setSelectionRange (range);
+		releaseAllNotes ();
+		startNote = nextStart;
 		updateKeyboard ();
-		selectedRange = rangeSelector->getSelectionRange ();
 	}
 
 	void updateKeyboard ()
 	{
-		if (!keyboard || !rangeSelector)
+		if (!keyboard)
 			return;
-		auto range = rangeSelector->getSelectionRange ();
-		CCoord whiteKeyWidth =
-		    std::floor (keyboard->getViewSize ().getWidth () / rangeSelector->getNumWhiteKeysSelected ());
-		if (range.position + range.length >
-		    rangeSelector->getNumKeys () + rangeSelector->getKeyRangeStart ())
+
+		keyboard->setKeyRange (startNote, kKeyboardNumKeys);
+
+		const auto numWhiteKeys = keyboard->getNumWhiteKeys ();
+		if (numWhiteKeys > 0)
 		{
-			range.length -= 1;
-			rangeSelector->setSelectionRange (range);
+			const CCoord whiteKeyWidth =
+			    std::floor (keyboard->getViewSize ().getWidth () / static_cast<CCoord> (numWhiteKeys));
+			keyboard->setWhiteKeyWidth (whiteKeyWidth);
+			keyboard->setBlackKeyWidth (whiteKeyWidth / 1.5);
 		}
-		keyboard->setKeyRange (range.position, range.length);
-		keyboard->setWhiteKeyWidth (whiteKeyWidth);
-		keyboard->setBlackKeyWidth (whiteKeyWidth / 1.5);
-		keyboard->setBlackKeyHeight (keyboard->getHeight () / 2.);
+		keyboard->setBlackKeyHeight (keyboard->getHeight () * 0.6);
+		keyboard->invalid ();
 	}
 
 	KeyboardView* keyboard {nullptr};
-	KeyboardViewRangeSelector* rangeSelector {nullptr};
 	IKeyboardViewPlayerDelegate* player {nullptr};
-	KeyboardViewRangeSelector::Range& selectedRange;
+	int16_t& startNote;
 	std::map<int32_t, NoteIndex> noteOnIds;
 };
 
@@ -227,9 +292,9 @@ VSTGUI::IKeyboardViewPlayerDelegate* createKeyboardPlayerDelegate (
 
 //------------------------------------------------------------------------
 IController* createKeyboardController (IController* parent, IKeyboardViewPlayerDelegate* inPlayer,
-                                      KeyboardViewRangeSelector::Range& range)
+                                      int16_t& startNote)
 {
-	return new KeyboardController (parent, inPlayer, range);
+	return new KeyboardController (parent, inPlayer, startNote);
 }
 
 //------------------------------------------------------------------------
