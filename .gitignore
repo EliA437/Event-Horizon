@@ -67,3 +67,14 @@ vcpkg_installed/
 # test output & cache
 Testing/
 .cache/
+
+# macOS / IDE
+.DS_Store
+*.xcuserdata*
+.vscode/
+.idea/
+*.xcodeproj/
+*.xcworkspace/
+
+# Nested dependency build artifacts
+external/*/build/
