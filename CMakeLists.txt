@@ -54,11 +54,17 @@ smtg_enable_vst3_sdk()
 smtg_add_vst3plugin(EventHorizon
     source/version.h
     source/eventhorizon_cids.h
+    source/eventhorizon_messaging.h
+    source/dsp/sine_engine.h
     source/eventhorizon_processor.h
     source/eventhorizon_processor.cpp
     source/eventhorizon_controller.h
     source/eventhorizon_controller.cpp
     source/eventhorizon_entry.cpp
+    source/ui/eventhorizon_keyboard_ui.h
+    source/ui/eventhorizon_keyboard_ui.cpp
+    ${vst3sdk_SOURCE_DIR}/vstgui4/vstgui/contrib/keyboardview.cpp
+    ${vst3sdk_SOURCE_DIR}/vstgui4/vstgui/contrib/keyboardview.h
 )
 
 target_compile_features(EventHorizon
@@ -70,6 +76,11 @@ target_link_libraries(EventHorizon
     PRIVATE
         sdk
         vstgui_support
+)
+
+target_include_directories(EventHorizon
+    PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/source
 )
 
 smtg_target_add_plugin_resources(EventHorizon

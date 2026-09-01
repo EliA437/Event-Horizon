@@ -6,6 +6,10 @@
 		<color name="background" rgba="#1a1a1eff"/>
 	</colors>
 	<template background-color="background" background-color-draw-style="filled" class="CViewContainer" mouse-enabled="true" name="view" opacity="1" origin="0, 0" size="1000, 600" transparent="false" wants-focus="false">
+		<view autosize="bottom " background-color="background" background-color-draw-style="filled and stroked" class="CViewContainer" mouse-enabled="true" opacity="1" origin="10, 500" size="980, 90" sub-controller="KeyboardController" transparent="true" wants-focus="false">
+			<view autosize="left right top bottom " black-key-color="~ BlackCColor" black-key-height="35" black-key-pressed-color="~ GreyCColor" black-key-width="16.6667" class="KeyboardView" draw-note-text="true" font-color="~ BlackCColor" frame-color="~ BlackCColor" frame-width="1" mouse-enabled="true" note-name-font="~ NormalFontVerySmall" num-keys="24" opacity="1" origin="5, 23" size="970, 62" start-note="48" transparent="false" wants-focus="false" white-key-color="~ WhiteCColor" white-key-pressed-color="~ GreyCColor" white-key-width="25"/>
+			<view black-key-color="~ BlackCColor" black-key-height="10" black-key-pressed-color="~ GreyCColor" black-key-width="3" class="KeyboardViewRangeSelector" draw-note-text="false" font-color="~ BlackCColor" frame-color="~ BlackCColor" frame-width="-1" mouse-enabled="true" note-name-font="~ SystemFont" num-keys="127" opacity="1" origin="5, 5" sel-range-max="24" sel-range-min="12" size="970, 17" start-note="0" transparent="false" wants-focus="false" white-key-color="~ WhiteCColor" white-key-pressed-color="~ GreyCColor" white-key-width="5"/>
+		</view>
 	</template>
 	<control-tags>
 	</control-tags>
